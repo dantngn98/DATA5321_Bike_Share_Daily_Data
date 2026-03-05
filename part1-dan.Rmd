@@ -1,0 +1,195 @@
+---
+title: "Final Project - Part1"
+author: "Dan Nguyen"
+date: "2026-03-05"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+# 1 - Read Data and EDA 
+
+```{r}
+# Read Data
+bike_raw <- read.csv("bike_sharing_daily.csv")
+
+# Re-assign values of variables
+bike_raw <- bike_raw %>%
+  mutate(
+    season     = factor(season,     levels = 1:4,  
+                        labels = c("Spring", "Summer", "Fall", "Winter")),
+    mnth       = factor(mnth,       levels = 1:12),
+    holiday    = factor(holiday,    levels = c(0,1), labels = c("No", "Yes")),
+    weekday    = factor(weekday,    levels = 0:6,  
+                        labels = c("Sun","Mon","Tue","Wed","Thu","Fri","Sat")),
+    workingday = factor(workingday, levels = c(0,1), labels = c("No", "Yes")),
+    weathersit = factor(weathersit, levels = 1:4,  
+                        labels = c("Clear", "Mist/Cloudy", "Light Rain/Snow", "Heavy Rain/Snow"))
+  )
+
+# Filter for 2011
+bike_2011 <- bike_raw %>% filter(yr == 0)
+```
+
+## Categorical Variables  
+Season, month, holiday, weekday, and workingday are standard characteristics within a year. There is no reason to expect significant variation in their distributions. Thus, we will not print out summary tables and plots for these variables.  
+
+### Weather Situation  
+```{r}
+table(bike_2011$weathersit)
+prop.table(table(bike_2011$weathersit))
+```
+```{r}
+bike_2011 %>%
+  count(weathersit) %>%
+  ggplot(aes(x = weathersit, y = n)) +
+  geom_col(width = 0.6, color = "white") +
+  geom_text(aes(label = n), vjust = -0.4, fontface = "bold") +
+  labs(title = "Weather Situation Distribution (2011)",
+       x = "Weather Situation", y = "# Days") +
+  theme_minimal()
+```
+## Continuous Variables  
+```{r}
+cont_vars <- bike_2011 %>% select(temp, atemp, hum, windspeed, casual, registered, cnt)
+
+# Numerical summary for all continuous variables
+summary(cont_vars)
+```
+### Temperature (`temp`)  
+
+```{r}
+hist(bike_2011$temp, main = "Histogram of Normalised Temperature",
+     xlab = "temp", breaks = 20)
+```
+
+### Feeling Temperature (`atemp`)  
+
+```{r}
+hist(bike_2011$atemp, main = "Histogram of Normalised Feeling Temp",
+     xlab = "atemp", breaks = 20)
+```
+
+### Humidity (`hum`)  
+
+```{r}
+hist(bike_2011$hum, main = "Histogram of Normalised Humidity",
+     xlab = "hum", breaks = 20)
+```
+
+### Wind Speed (`windspeed`)  
+
+```{r}
+hist(bike_2011$windspeed, main = "Histogram of Normalised Wind Speed",
+     xlab = "windspeed", breaks = 20)
+```
+
+### Total Rentals (`cnt`)  
+
+```{r}
+hist(bike_2011$cnt, main = "Histogram of Total Rentals",
+     xlab = "cnt", breaks = 25)
+```
+
+# 2 - Fit linear regression models predicting `cnt` using each of the variables separately.  
+## cnt ~ season  
+```{r}
+model_season <- lm(cnt ~ season, data = bike_2011)
+summary(model_season)
+```
+The model explains about 57% of the variance in total rentals. The coefficients indicate that, compared to Spring, summer has 2108 more rentals, fall has 2797 more rentals, and winter has 1997 more rentals on average. Overall, season is a good predictor of total rentals.  
+
+## cnt ~ mnth  
+```{r}
+model_mnth <- lm(cnt ~ mnth, data = bike_2011)
+summary(model_mnth)
+```
+The model has a better R2 than season, explaining about 70% of the variance in total rentals. Due to the strong corelation between month and season, the coefficients for month show a clear seasonal pattern. Rentals peak in the summer months (6, 7, 8).  
+
+## cnt ~ holiday  
+```{r}
+model_holiday <- lm(cnt ~ holiday, data = bike_2011)
+summary(model_holiday)
+```
+The model has a very low R2 of 0.002, indicating that holiday status is not a good predictor of total rentals.  
+
+## cnt ~ weekday  
+```{r}
+model_weekday <- lm(cnt ~ weekday, data = bike_2011)
+summary(model_weekday)
+```
+This model also has a low R2 of 0.003, suggesting that day of the week is a bad predictor of total rentals.  
+
+## cnt ~ workingday
+```{r}
+model_workingday <- lm(cnt ~ workingday, data = bike_2011)
+summary(model_workingday)
+```
+
+This model's R2 is worse. At 0.0004, it indicates that whether it's a working day or not has no predictive power for total rentals.  
+
+## cnt ~ weathersit  
+```{r}
+model_weathersit <- lm(cnt ~ weathersit, data = bike_2011)
+summary(model_weathersit)
+```
+This model has an R2 of 0.11. The coefficients show that, compared to clear weather, adverse weather conditions (mist/cloudy, light rain/snow, heavy rain/snow) are associated with fewer rentals. However, the model's overall predictive power is still quite low.  
+
+## cnt ~ temp  
+```{r}
+model_temp <- lm(cnt ~ temp, data = bike_2011)
+summary(model_temp)
+```
+This model has an R2 of 0.59, indicating that temperature is a strong predictor of total rentals. The positive coefficient suggests that higher temperatures are associated with more rentals.  
+
+## cnt ~ atemp  
+```{r}
+model_atemp <- lm(cnt ~ atemp, data = bike_2011)
+summary(model_atemp)
+```
+This model has an R2 of 0.6, slightly better than temp. The positive coefficient indicates that higher feeling temperatures are associated with more rentals.  
+
+## cnt ~ hum  
+```{r}
+model_hum <- lm(cnt ~ hum, data = bike_2011)
+summary(model_hum)
+```
+
+This model has a very low R2, the p-value for hum is also not significant. This suggests that humidity is not a good predictor of total rentals.  
+
+## cnt ~ windspeed  
+```{r}
+model_windspeed <- lm(cnt ~ windspeed, data = bike_2011)
+summary(model_windspeed)
+```
+This model has a low R2 pf 0.07, indicating that wind speed is a weak predictor of total rentals.  
+
+# 3 - Fit multiple linear regression models with interactions.  
+Given that season, mnth, weathersit, temp, atemp are good predictors individually, we will explore interactions between these variables.  
+## cnt ~ temp*weathersit  
+```{r}
+model_temp_weathersit <- lm(cnt ~ temp * weathersit, data = bike_2011)
+summary(model_temp_weathersit)
+```
+This model has an R2 of 0.67, which is an improvement over the temp-only model. The interaction terms are not significant, suggesting that the effect of temperature on rentals does not differ significantly across weather situations. However, the main effect of temp and cloudy weather remain strong and significant.  
+
+## cnt ~ temp*season  
+```{r}
+model_temp_season <- lm(cnt ~ temp * season, data = bike_2011)
+summary(model_temp_season)
+```
+This model has an R2 of 0.71, which is better than both the temp-only and season-only models. The interaction terms are significant, indicating that the effect of temperature on rentals varies by season.  
+
+## cnt ~ month*weathersit  
+```{r}
+model_month_weathersit <- lm(cnt ~ mnth * weathersit, data = bike_2011)
+summary(model_month_weathersit)
+```
+This model produces the best R2 so far of 0.814. All of the months are significant predictors of rentals, and some interaction terms are also significant, indicating that the effect of month on rentals varies by weather situation. This makes sense as the impact of weather on rentals is likely to be more pronounced in certain months (e.g cloudy weather may have higher effect in summer months when it's usually hot).  
+
+
+
+
