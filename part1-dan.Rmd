@@ -191,5 +191,59 @@ summary(model_month_weathersit)
 This model produces the best R2 so far of 0.814. All of the months are significant predictors of rentals, and some interaction terms are also significant, indicating that the effect of month on rentals varies by weather situation. This makes sense as the impact of weather on rentals is likely to be more pronounced in certain months (e.g cloudy weather may have higher effect in summer months when it's usually hot).  
 
 
+# 4. Using Backward Selection
+
+```{r}
+# we need to drop the empty weathersit level first
+bike_2011 <- bike_2011 %>% mutate(weathersit = droplevels(weathersit))
+
+# from part 3, we use the interaction plus all the predicts
+full_model <- lm(cnt ~ season + mnth + holiday + weekday + workingday + weathersit + temp + hum + 
+windspeed + temp:weathersit + temp:season + 
+mnth:weathersit,
+data = bike_2011)
+
+summary(full_model)
+
+# using AIC for backward selection
+library(MASS)
+
+final_model <- stepAIC(full_model, direction = "backward", trace = TRUE)
+
+summary(final_model)
+formula(final_model)
+```
+
+- So we first start with the full model, we get AIC of 4590.85. Then we first dropped weekday and because removing it, our model improved to 4584.7, that means weekday added noises not signal. So then we dropped temp:weathesit interaction, it then improved to 4584.0. So then we stopped because removing anything else would increasing the AIC. Hence the final model we keep is cnt ~ season + mnth + holiday + weathersit + temp + hum + windspeed + season:temp + mnth:weathersit. So to my undersanding this part is that AIC balances between model fit and complexity. Basically it only keeps a predictor if it earns its place by improving fit enough to justify the added complexity. And so as we see that weekday and temp:weathersit failed the backwward selection test.
+
+- Another thing, the final model explains 88 percent of variance in daily rental as shown R^2 = 0.88. Temperature is the strongest driver of ridership, however, it varies by season. So as we can see in Fall where rental drops sharply as temperatures cool. Huminity, windspeed, and holidays all negatively impact rentals. Bad weather like Mist/CLoudy, light rain/snow is hurting ridership most during peak summer and fall months when they expect it to be good weather.
+
+# 5. 
+```{r}
+# preparing data for 2012
+bike_2012 <- bike_raw %>% filter(yr == 1) %>% mutate(weathersit = droplevels(weathersit))
+```
+
+```{r}
+# predict and print out the metrics
+preds <- predict(final_model, newdata = bike_2012)
+
+# metrics
+rmse <- sqrt(mean((bike_2012$cnt - preds)^2))
+r2   <- cor(bike_2012$cnt, preds)^2
+
+rmse
+r2
+```
+-The model performs quite worse comparing to last part. This suggests us that model captured 2011 data pattern well but does not generalize perfectly to 2012. But think about this intuitively, it is likely that ridership grew overall in 2012 as the bike share system matued. So it made sense that a trend the model was not trained to account for.
+
+```{r}
+# visualize the plot
+ggplot(bike_2012, aes(x = preds, y = cnt)) + geom_point(alpha = 0.4, color = "steelblue") +
+geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+labs(title = "Actual vs Predicted - 2012", x = "Predicted", y = "Actual") +
+theme_minimal()
+```
+
 
 
