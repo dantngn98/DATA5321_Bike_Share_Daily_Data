@@ -1,0 +1,218 @@
+---
+title: "DATA 5321 - Group Final Project"
+author: "Duy Nguyen"
+date: "2026-03-04"
+output:
+  pdf_document:
+    latex_engine: xelatex
+geometry: margin=0.7in
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 60),  # Try 60-70 instead of 40
+  size = "small"  # or "footnotesize" for smaller
+)
+
+library(tidyverse)
+```
+
+```{r}
+# Read Data
+bike_raw <- read.csv("/Users/dcnguyen060899/Downloads/SU_Winter_2026/DATA_5321/DATA5321_Bike_Share_Daily_Data/data/bike_sharing_daily.csv")
+
+# Re-assign values of variables
+bike_raw <- bike_raw %>%
+  mutate(
+    season     = factor(season,     levels = 1:4,  labels = c("Spring", "Summer", "Fall", "Winter")),
+    mnth       = factor(mnth,       levels = 1:12),
+    holiday    = factor(holiday,    levels = c(0,1), labels = c("No", "Yes")),
+    weekday    = factor(weekday,    levels = 0:6,  labels = c("Sun","Mon","Tue","Wed","Thu","Fri","Sat")),
+    workingday = factor(workingday, levels = c(0,1), labels = c("No", "Yes")),
+    weathersit = factor(weathersit, levels = 1:4,  labels = c("Clear", "Mist/Cloudy", "Light Rain/Snow", "Heavy Rain/Snow"))
+  )
+
+# Filter for 2011
+bike_2011 <- bike_raw %>% filter(yr == 0)
+```
+
+```{r}
+# let's first understand the data dimension, variable type, any missing value, its basic summary statistic
+dim(bike_2011)
+str(bike_2011)
+summary(bike_2011)
+colSums(is.na(bike_2011))
+
+```
+ - There are 365 rows, so that is basically 365 days in a year in 2011, and 16 columns
+ - Factors are correctly assigned to categorical feature like season, mnth, holiday, weekday, workingday, weathersit
+ - our outcome variable are cnt, casual, registed and they are integers
+ - instant is like ID indexing and yr encode as year like 0 for 20113, 1 for 2012, so these we probably won't include as our predictors.
+
+For summary:
+- 90 days each for each seasons so data is balanced
+- weathersit:mostly clear with 226, Mist/Claudy (124), very few Light Rain (15), zero Heavy Rain
+
+Good news, no missing data.
+
+However, considering three things:
+1. There is no observation heavy rain or snow. Might bias in modelling.
+2. hum minimum is 0 seems unsual
+3. cnt has a wide range, good to check its distribution in EDA
+
+Now we have a set of continuous and categorical variables.
+
+```{r}
+# Continuous variables
+bike_2011 %>%
+  select(temp, atemp, hum, windspeed, cnt) %>%
+  summary()
+
+# Standard deviations
+bike_2011 %>%
+  select(temp, atemp, hum, windspeed, cnt) %>%
+  summarise(across(everything(), sd))
+
+# Categorical variables - counts and proportions
+cat_vars <- c("season", "mnth", "holiday", "weekday", "workingday", "weathersit")
+
+for(var in cat_vars) {
+  cat("\n---", var, "---\n")
+  tbl <- table(bike_2011[[var]])
+  print(tbl)
+  print(round(prop.table(tbl), 3))
+}
+```
+
+- Important thing to flag:
+1. again hum min is 0, this could be possible outlier
+2. again heavy rain or snow have no observation
+3. holiday is very imbalanced
+4. then also temp and atemp is likely multicollinear (this would violate the “no multicollinearity” (full-rank X) assumption of linear regression)
+
+```{r}
+cont_vars <- c("temp", "atemp", "hum", "windspeed", "cnt")
+
+for(var in cont_vars) {
+  p <- ggplot(bike_2011, aes(x = .data[[var]])) +
+    geom_density(fill = "steelblue", alpha = 0.5) +
+    geom_vline(aes(xintercept = mean(.data[[var]])),
+               color = "red", linetype = "dashed") +
+    labs(title = paste("Density Plot of", var),
+         x = var, y = "Density") +
+    theme_minimal()
+  print(p)
+}
+```
+
+- temp: two peak, indicating bimodal
+- atemp: also bimodal, indicating it correlate with tempt
+- hum: left skewed, though look like a small bum at 0 even though stat said otherwise
+- windspeed: right skewed
+- cnt: also look bimodal, similar mirros the temp because intuitively, code days are low rental and warm days high rentals.
+
+```{r}
+
+for(var in cat_vars) {
+  p <- ggplot(bike_2011, aes(x = .data[[var]])) +
+    geom_bar(fill = "steelblue", alpha = 0.7) +
+    geom_text(stat = "count",
+              aes(label = after_stat(count)),
+              vjust = -0.5, size = 3) +
+    labs(title = paste("Frequency of", var),
+         x = var, y = "Count") +
+    theme_minimal()
+  print(p)
+}
+```
+
+- season: near perfectly balanced
+- mnth: also seem balanced too
+- holiday: severely imbalanced
+- weekday: perfectly balanced
+- workingday: moderately balanced. Though note that workinday and weekday + holiday are logically redundant because working day is determined by weekday and holiday
+- Since again, we repeated ourself that heavy rain/snow completely absent so let's drop it for modelling
+
+Key flag to watch out:
+- holiday imbalance - unreliable predictor
+- workingday is multicollinearity with weekday + holiday
+
+```{r}
+# dropping heavy rain/snow
+bike_2011 <- bike_2011 %>%
+  mutate(weathersit = droplevels(weathersit))
+
+levels(bike_2011$weathersit)
+```
+
+Now let's understand the relationship between predictors and cnt?
+
+```{r}
+cont_preds <- c("temp", "atemp", "hum", "windspeed")
+
+for(var in cont_preds) {
+  p <- ggplot(bike_2011, aes(x = .data[[var]], y = cnt)) +
+    geom_point(alpha = 0.4, color = "steelblue") +
+    geom_smooth(method = "lm", color = "red", se = TRUE) +
+    labs(title = paste("cnt vs", var),
+         x = var, y = "Daily Rentals (cnt)") +
+    theme_minimal()
+  print(p)
+}
+
+```
+
+- cnt vs temp: there is a strong positive relationship
+- cnt vs atemp: nearly identical to temp plot, so this confim multicollinearity
+- cnt vs hum: almost a flat line indicating no relationship
+- cnt vs windspeed: there is a negative relationship
+
+
+
+```{r}
+cat_preds <- c("season", "mnth", "holiday", 
+               "weekday", "workingday", "weathersit")
+
+for(var in cat_preds) {
+  p <- ggplot(bike_2011, aes(x = .data[[var]], y = cnt)) +
+    geom_boxplot(fill = "steelblue", alpha = 0.5) +
+    labs(title = paste("cnt by", var),
+         x = var, y = "Daily Rentals (cnt)") +
+    theme_minimal()
+  print(p)
+}
+```
+
+- There is a clear differences across seasons. Because of this differences, there will be variations model can expoloit therefore this going to be a strong predictor.
+- cnt by mnth: There is an inverted U-shape. I would say that mnth captures the seasonal trend very granularly
+
+- cnt by holiday: there is a slight differnce as holidays have slightly lower median rentals. the differnce is not significant. I would say this is a week predictor.
+- cnt by weekday: boxes are very similar across all days. Hence, there is a little effect on rental. probably week predictor as well
+- cnt by workingday: identical distributions. probably week predictor as well.
+- weatherit: after we dropped the no observation for heavy rain/snow, there is a clear downward staircase pattern. That means as weather worsen so rental drop
+
+Note that Light Rain/Snow box is very wide relative to its size, it would be unstable estimates due to only 15 observations
+
+### Summary:
+```{r, echo=FALSE}
+cat("
+| Predictor      | Type         | Relationship with cnt                          |
+|----------------|--------------|-----------------------------------------------|
+| temp / atemp   | Continuous   | Strong positive                               |
+| season         | Categorical  | Strong — clear group differences              |
+| mnth           | Categorical  | Strong — inverted U shape                     |
+| weathersit     | Categorical  | Strong — staircase drop                       |
+| windspeed      | Continuous   | Moderate negative                             |
+| hum            | Continuous   | Weak/flat                                     |
+| holiday        | Categorical  | Weak — overlapping boxes                      |
+| weekday        | Categorical  | Weak — nearly identical boxes                 |
+| workingday     | Categorical  | Weak — nearly identical boxes                 |
+")
+```
+
+
+
