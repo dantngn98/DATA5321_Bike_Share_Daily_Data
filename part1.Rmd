@@ -1,6 +1,6 @@
 ---
 title: "Final Project - Part1"
-author: "Dan Nguyen"
+author: "Dan Nguyen, Duy Nguyen"
 date: "2026-03-05"
 output: pdf_document
 ---
@@ -8,6 +8,7 @@ output: pdf_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
+library(leaps)
 ```
 
 # 1 - Read Data and EDA 
@@ -191,51 +192,82 @@ summary(model_month_weathersit)
 This model produces the best R2 so far of 0.814. All of the months are significant predictors of rentals, and some interaction terms are also significant, indicating that the effect of month on rentals varies by weather situation. This makes sense as the impact of weather on rentals is likely to be more pronounced in certain months (e.g cloudy weather may have higher effect in summer months when it's usually hot).  
 
 
-# 4. Using Backward Selection
+# 4. Using Backward Selection  
 
 ```{r}
-# we need to drop the empty weathersit level first
-bike_2011 <- bike_2011 %>% mutate(weathersit = droplevels(weathersit))
 
 # from part 3, we use the interaction plus all the predicts
-full_model <- lm(cnt ~ season + mnth + holiday + weekday + workingday + weathersit + temp + hum + 
-windspeed + temp:weathersit + temp:season + 
-mnth:weathersit,
-data = bike_2011)
+regfit_backward <- regsubsets(cnt ~ season + mnth + holiday + weekday + workingday 
+                 + weathersit + temp + hum + 
+                   windspeed + temp:weathersit + temp:season + 
+                   mnth:weathersit,
+                   data = bike_2011,
+                 method="backward",
+                 nvmax=50)
 
-summary(full_model)
+regfit_backward_summary <- summary(regfit_backward)
 
-# using AIC for backward selection
-library(MASS)
+# Collect the metrics for each model
+metrics <- data.frame(
+  Model = 1:48,
+  Backward_adjR2 = regfit_backward_summary$adjr2,
+  Backward_cp = regfit_backward_summary$cp,
+  Backward_bic = regfit_backward_summary$bic
+)
 
-final_model <- stepAIC(full_model, direction = "backward", trace = TRUE)
-
-summary(final_model)
-formula(final_model)
+metrics
 ```
+```{r}
+# Get model with best adjusted R2
+best_model_adjR2 <- which.max(regfit_backward_summary$adjr2)
+best_model_adjR2
+```
+```{r}
+# View coefficients
+coef(regfit_backward, best_model_adjR2)
+```
+From the coefficients, we can see that the factors associated with more bike rentals are:  
+- Season (relative to Spring): Fall (+1410) and Winter (+1371).  
+- Months (relative to January): May (+2308), June (+2278), April (+1842), July (+1715), and September (+1978).  
+- Weekdays: Friday (+76) and Saturday (+87) - more retals near weekend.  
+- Higher temperature in summer: seasonSummer:temp (+3212).  
+Factors associated with fewer bike rentals are:  
+- Holiday (-387).  
+- Light Rain/Snow (-1677).  
+- High wind speed (-1199).  
+- Weather combined with temperature: Mist/Cloudy × Temperature (-839), Rain/Snow × Temperature (-1151).  
 
-- So we first start with the full model, we get AIC of 4590.85. Then we first dropped weekday and because removing it, our model improved to 4584.7, that means weekday added noises not signal. So then we dropped temp:weathesit interaction, it then improved to 4584.0. So then we stopped because removing anything else would increasing the AIC. Hence the final model we keep is cnt ~ season + mnth + holiday + weathersit + temp + hum + windspeed + season:temp + mnth:weathersit. So to my undersanding this part is that AIC balances between model fit and complexity. Basically it only keeps a predictor if it earns its place by improving fit enough to justify the added complexity. And so as we see that weekday and temp:weathersit failed the backwward selection test.
-
-- Another thing, the final model explains 88 percent of variance in daily rental as shown R^2 = 0.88. Temperature is the strongest driver of ridership, however, it varies by season. So as we can see in Fall where rental drops sharply as temperatures cool. Huminity, windspeed, and holidays all negatively impact rentals. Bad weather like Mist/CLoudy, light rain/snow is hurting ridership most during peak summer and fall months when they expect it to be good weather.
 
 # 5. 
 ```{r}
-# preparing data for 2012
-bike_2012 <- bike_raw %>% filter(yr == 1) %>% mutate(weathersit = droplevels(weathersit))
+# Prepare data for 2012
+bike_2012 <- bike_raw %>% filter(yr == 1)
 ```
 
 ```{r}
 # predict and print out the metrics
-preds <- predict(final_model, newdata = bike_2012)
+# Get coefficients
+coef_backward <- coef(regfit_backward, best_model_adjR2)
+# Build model matrix
+X_2012 <- model.matrix(cnt ~ season + mnth + holiday + weekday + workingday +
+                       weathersit + temp + hum + windspeed +
+                       temp:weathersit + temp:season +
+                       mnth:weathersit,
+                       data = bike_2012)
+# Generate prediction
+vars <- names(coef_backward)
+
+pred_2012 <- X_2012[, vars] %*% coef_backward
+bike_2012$preds <- pred_2012
 
 # metrics
-rmse <- sqrt(mean((bike_2012$cnt - preds)^2))
-r2   <- cor(bike_2012$cnt, preds)^2
+rmse <- sqrt(mean((bike_2012$cnt - bike_2012$preds)^2))
+r2   <- cor(bike_2012$cnt, bike_2012$preds)^2
 
 rmse
 r2
 ```
--The model performs quite worse comparing to last part. This suggests us that model captured 2011 data pattern well but does not generalize perfectly to 2012. But think about this intuitively, it is likely that ridership grew overall in 2012 as the bike share system matued. So it made sense that a trend the model was not trained to account for.
+-The model performs quite worse comparing to last part. This suggests us that model captured 2011 data pattern well but does not generalize perfectly to 2012.  
 
 ```{r}
 # visualize the plot
