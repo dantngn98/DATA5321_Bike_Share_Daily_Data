@@ -1,0 +1,434 @@
+---
+title: "Final Project"
+author: "Dan Nguyen, Duy Nguyen"
+date: "2026-03-05"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(leaps)
+library(glmnet)
+library(pls)
+library(gam)
+```
+
+# Part 1  
+## 1 - Read Data and EDA 
+
+```{r}
+# Read Data
+bike_raw <- read.csv("bike_sharing_daily.csv")
+
+# Re-assign values of variables
+bike_raw <- bike_raw %>%
+  mutate(
+    season     = factor(season,     levels = 1:4,  
+                        labels = c("Spring", "Summer", "Fall", "Winter")),
+    mnth       = factor(mnth,       levels = 1:12),
+    holiday    = factor(holiday,    levels = c(0,1), labels = c("No", "Yes")),
+    weekday    = factor(weekday,    levels = 0:6,  
+                        labels = c("Sun","Mon","Tue","Wed","Thu","Fri","Sat")),
+    workingday = factor(workingday, levels = c(0,1), labels = c("No", "Yes")),
+    weathersit = factor(weathersit, levels = 1:4,  
+                        labels = c("Clear", "Mist/Cloudy", "Light Rain/Snow", "Heavy Rain/Snow"))
+  )
+
+# Filter for 2011
+bike_2011 <- bike_raw %>% filter(yr == 0)
+```
+
+### Categorical Variables   
+Season, month, holiday, weekday, and workingday are standard characteristics within a year. There is no reason to expect significant variation in their distributions. Thus, we will not print out summary tables and plots for these variables.  
+
+#### Weather Situation  
+```{r}
+table(bike_2011$weathersit)
+prop.table(table(bike_2011$weathersit))
+```
+```{r, fig.width=6, fig.height=4}
+bike_2011 %>%
+  count(weathersit) %>%
+  ggplot(aes(x = weathersit, y = n)) +
+  geom_col(width = 0.6, color = "white") +
+  geom_text(aes(label = n), vjust = -0.4, fontface = "bold") +
+  labs(title = "Weather Situation Distribution (2011)",
+       x = "Weather Situation", y = "# Days") +
+  theme_minimal()
+```
+
+### Continuous Variables  
+
+```{r}
+cont_vars <- bike_2011 %>% select(temp, atemp, hum, windspeed, casual, registered, cnt)
+
+# Numerical summary for all continuous variables
+summary(cont_vars)
+```
+#### Temperature (`temp`)   
+
+```{r, fig.width=6, fig.height=4, fig.align='center'}
+hist(bike_2011$temp, main = "Histogram of Normalised Temperature",
+     xlab = "temp", breaks = 20)
+```
+
+#### Feeling Temperature (`atemp`)  
+
+```{r, fig.width=6, fig.height=4, fig.align='center'}
+hist(bike_2011$atemp, main = "Histogram of Normalised Feeling Temp",
+     xlab = "atemp", breaks = 20)
+```
+
+#### Humidity (`hum`)  
+
+```{r, fig.width=6, fig.height=4, fig.align='center'}
+hist(bike_2011$hum, main = "Histogram of Normalised Humidity",
+     xlab = "hum", breaks = 20)
+```
+
+#### Wind Speed (`windspeed`)  
+
+```{r, fig.width=6, fig.height=4, fig.align='center'}
+hist(bike_2011$windspeed, main = "Histogram of Normalised Wind Speed",
+     xlab = "windspeed", breaks = 20)
+```
+
+#### Total Rentals (`cnt`)  
+
+```{r, fig.align='center'}
+hist(bike_2011$cnt, main = "Histogram of Total Rentals",
+     xlab = "cnt", breaks = 25)
+```
+
+## 2 - Fit linear regression models predicting `cnt` using each of the variables separately.  
+### cnt ~ season  
+```{r}
+model_season <- lm(cnt ~ season, data = bike_2011)
+summary(model_season)
+```
+The model explains about 57% of the variance in total rentals. The coefficients indicate that, compared to Spring, summer has 2108 more rentals, fall has 2797 more rentals, and winter has 1997 more rentals on average. Overall, season is a good predictor of total rentals.  
+
+### cnt ~ mnth  
+```{r}
+model_mnth <- lm(cnt ~ mnth, data = bike_2011)
+summary(model_mnth)
+```
+The model has a better R2 than season, explaining about 70% of the variance in total rentals. Due to the strong corelation between month and season, the coefficients for month show a clear seasonal pattern. Rentals peak in the summer months (6, 7, 8).  
+
+### cnt ~ holiday  
+```{r}
+model_holiday <- lm(cnt ~ holiday, data = bike_2011)
+summary(model_holiday)
+```
+The model has a very low R2 of 0.002, indicating that holiday status is not a good predictor of total rentals.  
+
+### cnt ~ weekday  
+```{r}
+model_weekday <- lm(cnt ~ weekday, data = bike_2011)
+summary(model_weekday)
+```
+This model also has a low R2 of 0.003, suggesting that day of the week is a bad predictor of total rentals.  
+
+### cnt ~ workingday
+```{r}
+model_workingday <- lm(cnt ~ workingday, data = bike_2011)
+summary(model_workingday)
+```
+
+This model's R2 is worse. At 0.0004, it indicates that whether it's a working day or not has no predictive power for total rentals.  
+
+### cnt ~ weathersit  
+```{r}
+model_weathersit <- lm(cnt ~ weathersit, data = bike_2011)
+summary(model_weathersit)
+```
+This model has an R2 of 0.11. The coefficients show that, compared to clear weather, adverse weather conditions (mist/cloudy, light rain/snow, heavy rain/snow) are associated with fewer rentals. However, the model's overall predictive power is still quite low.  
+
+### cnt ~ temp  
+```{r}
+model_temp <- lm(cnt ~ temp, data = bike_2011)
+summary(model_temp)
+```
+This model has an R2 of 0.59, indicating that temperature is a strong predictor of total rentals. The positive coefficient suggests that higher temperatures are associated with more rentals.  
+
+### cnt ~ atemp  
+```{r}
+model_atemp <- lm(cnt ~ atemp, data = bike_2011)
+summary(model_atemp)
+```
+This model has an R2 of 0.6, slightly better than temp. The positive coefficient indicates that higher feeling temperatures are associated with more rentals.  
+
+### cnt ~ hum  
+```{r}
+model_hum <- lm(cnt ~ hum, data = bike_2011)
+summary(model_hum)
+```
+
+This model has a very low R2, the p-value for hum is also not significant. This suggests that humidity is not a good predictor of total rentals.  
+
+### cnt ~ windspeed  
+```{r}
+model_windspeed <- lm(cnt ~ windspeed, data = bike_2011)
+summary(model_windspeed)
+```
+This model has a low R2 pf 0.07, indicating that wind speed is a weak predictor of total rentals.  
+
+## 3 - Fit multiple linear regression models with interactions.  
+Given that season, mnth, weathersit, temp, atemp are good predictors individually, we will explore interactions between these variables.  
+### cnt ~ temp*weathersit  
+```{r}
+model_temp_weathersit <- lm(cnt ~ temp * weathersit, data = bike_2011)
+summary(model_temp_weathersit)
+```
+This model has an R2 of 0.67, which is an improvement over the temp-only model. The interaction terms are not significant, suggesting that the effect of temperature on rentals does not differ significantly across weather situations. However, the main effect of temp and cloudy weather remain strong and significant.  
+
+### cnt ~ temp*season  
+```{r}
+model_temp_season <- lm(cnt ~ temp * season, data = bike_2011)
+summary(model_temp_season)
+```
+This model has an R2 of 0.71, which is better than both the temp-only and season-only models. The interaction terms are significant, indicating that the effect of temperature on rentals varies by season.  
+
+### cnt ~ month*weathersit  
+```{r}
+model_month_weathersit <- lm(cnt ~ mnth * weathersit, data = bike_2011)
+summary(model_month_weathersit)
+```
+This model produces the best R2 so far of 0.814. All of the months are significant predictors of rentals, and some interaction terms are also significant, indicating that the effect of month on rentals varies by weather situation. This makes sense as the impact of weather on rentals is likely to be more pronounced in certain months (e.g cloudy weather may have higher effect in summer months when it's usually hot).  
+
+
+## 4. Using Backward Selection  
+
+```{r}
+
+# from part 3, we use the interaction plus all the predicts
+regfit_backward <- regsubsets(cnt ~ season + mnth + holiday + weekday + workingday 
+                 + weathersit + temp + hum + 
+                   windspeed + temp:weathersit + temp:season + 
+                   mnth:weathersit,
+                   data = bike_2011,
+                 method="backward",
+                 nvmax=50)
+
+regfit_backward_summary <- summary(regfit_backward)
+
+# Collect the metrics for each model
+metrics <- data.frame(
+  Model = 1:48,
+  Backward_adjR2 = regfit_backward_summary$adjr2,
+  Backward_cp = regfit_backward_summary$cp,
+  Backward_bic = regfit_backward_summary$bic
+)
+
+metrics
+```
+```{r}
+# Get model with best adjusted R2
+best_model_adjR2 <- which.max(regfit_backward_summary$adjr2)
+cat(sprintf("The best model according to adjusted R2 has %d predictors. \n", best_model_adjR2))
+cat(sprintf("Best R2: %.4f \n", regfit_backward_summary$adjr2[best_model_adjR2]))
+```
+```{r}
+# View coefficients
+coef(regfit_backward, best_model_adjR2)
+```
+From the coefficients, we can see that the factors associated with more bike rentals are:  
+- Season (relative to Spring): Fall (+1410) and Winter (+1371).  
+- Months (relative to January): May (+2308), June (+2278), April (+1842), July (+1715), and September (+1978).  
+- Weekdays: Friday (+76) and Saturday (+87) - more retals near weekend.  
+- Higher temperature in summer: seasonSummer:temp (+3212).  
+Factors associated with fewer bike rentals are:  
+- Holiday (-387).  
+- Light Rain/Snow (-1677).  
+- High wind speed (-1199).  
+- Weather combined with temperature: Mist/Cloudy × Temperature (-839), Rain/Snow × Temperature (-1151).  
+
+
+## 5. 
+```{r}
+# Prepare data for 2012
+bike_2012 <- bike_raw %>% filter(yr == 1)
+```
+
+```{r}
+# predict and print out the metrics
+# Get coefficients
+coef_backward <- coef(regfit_backward, best_model_adjR2)
+# Build model matrix
+X_2012 <- model.matrix(cnt ~ season + mnth + holiday + weekday + workingday +
+                       weathersit + temp + hum + windspeed +
+                       temp:weathersit + temp:season +
+                       mnth:weathersit,
+                       data = bike_2012)
+# Generate prediction
+vars <- names(coef_backward)
+
+pred_2012 <- X_2012[, vars] %*% coef_backward
+bike_2012$preds <- pred_2012
+
+# metrics
+backward_rsme <- sqrt(mean((bike_2012$cnt - bike_2012$preds)^2))
+backward_r2   <- cor(bike_2012$cnt, bike_2012$preds)^2
+
+cat(sprintf("RMSE on 2012 data: %.2f \n", backward_rsme))
+cat(sprintf("R2 on 2012 data: %.4f \n", backward_r2))
+```
+-The model performs quite worse comparing to last part. This suggests us that model captured 2011 data pattern well but does not generalize perfectly to 2012.  
+
+```{r}
+# visualize the plot
+ggplot(bike_2012, aes(x = preds, y = cnt)) + geom_point(alpha = 0.4, color = "steelblue") +
+geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+labs(title = "Actual vs Predicted - 2012", x = "Predicted", y = "Actual") +
+theme_minimal()
+```
+
+# Part 2  
+## 1. Lasso, Ridge, PCR, PLS.  
+### Lasso Regression  
+```{r}
+set.seed(1)
+X_2011_matrix <- model.matrix(cnt ~ season + mnth + holiday + weekday + workingday +
+                       weathersit + temp + hum + windspeed,
+                       data = bike_2011)[, -1]
+Y_2011 <- bike_2011$cnt
+# Cross-validation to find optimal lambda
+cv_lasso <- cv.glmnet(X_2011_matrix, Y_2011, alpha = 1)
+plot(cv_lasso)
+# Best lambda
+best_lambda <- cv_lasso$lambda.min
+cat(sprintf("The best lambda based on cv is: %.2f \n", best_lambda))
+
+# Train the lasso model with the best lambda
+lasso_model <- glmnet(X_2011_matrix, Y_2011, alpha = 1, lambda = best_lambda)
+
+# Get training r2
+preds_2011_lasso <- predict(lasso_model, newx = X_2011_matrix)
+r2_lasso_2011 <- cor(Y_2011, preds_2011_lasso)^2
+cat(sprintf("Training R2 for best lasso model: %.2f \n", r2_lasso_2011))
+cat(sprintf("Coefficients of the best lasso model: \n"))
+print(coef(lasso_model))
+```
+The lasso model that produce the best cv MSE has a lamda of 10.14. The training R2 for this model is 0.84 which is slightly lower than the model selected by backward selection (0.86). This model shrinks the coefficients of some predictors to 0, bringing the total number of predictor to 21.  
+
+### Ridge Regression  
+```{r}
+set.seed(1)
+# Cross-validation to find optimal lambda
+cv_ridge <- cv.glmnet(X_2011_matrix, Y_2011, alpha = 0)
+plot(cv_ridge)
+# Best lambda
+best_lambda_ridge <- cv_ridge$lambda.min
+cat(sprintf("The best lambda for ridge regression based on cv is: %.2f \n", best_lambda_ridge))
+
+# Train the ridge model with the best lambda
+ridge_model <- glmnet(X_2011_matrix, Y_2011, alpha = 0, lambda = best_lambda_ridge)
+
+# Get training r2
+preds_2011_ridge <- predict(ridge_model, newx = X_2011_matrix)
+r2_ridge_2011 <- cor(Y_2011, preds_2011_ridge)^2
+cat(sprintf("Training R2 for best ridge model: %.2f \n", r2_ridge_2011))
+cat(sprintf("Coefficients of the best ridge model: \n"))
+print(coef(ridge_model))
+```
+The ridge model that produce the best cv MSE has a lamda of 106.19. This model's training R2 is 0.84, which is the same as the lasso model.  Both fits the data well, but the ridge model does not perform variable selection and thus retains all predictors with non-zero coefficients.  
+
+### PCR  
+```{r}
+set.seed(1)
+X_2011_matrix <- X_2011_matrix[, apply(X_2011_matrix, 2, var) > 0]
+prc_fit <- pcr(cnt ~ X_2011_matrix,
+                       data = bike_2011, scale = TRUE, validation = "CV")
+validationplot(prc_fit, val.type = "MSEP")
+
+cat(sprintf("M with lowest MSEP for PCR: %d\n", which.min(prc_fit$validation$PRESS)))
+
+# Get model with best M and its training R2
+best_M <- which.min(prc_fit$validation$PRESS)
+preds_2011_pcr <- predict(prc_fit, ncomp = best_M)
+r2_pcr_2011 <- cor(Y_2011, preds_2011_pcr)^2
+cat(sprintf("Training R2 for best PCR model: %.2f \n", r2_pcr_2011))
+```
+The PCR model that produces the best cv MSE has M = 25. The training R2 for this model is 0.84, which is on par with the lasso and ridge models.  
+### PLS
+```{r}
+set.seed(1)
+pls_fit <- plsr(cnt ~ X_2011_matrix,
+                       data = bike_2011, scale = TRUE, validation = "CV")
+validationplot(pls_fit, val.type = "MSEP")
+
+cat(sprintf("M with lowest MSEP for PLS: %d\n", which.min(pls_fit$validation$PRESS)))
+# Get model with best M and its training R2
+best_M_pls <- which.min(pls_fit$validation$PRESS)
+preds_2011_pls <- predict(pls_fit, ncomp = best_M_pls)
+r2_pls_2011 <- cor(Y_2011, preds_2011_pls)^2
+cat(sprintf("Training R2 for best PLS model: %.2f \n", r2_pls_2011))
+```
+The best PLS model has M = 6. The training R2 for this model is also 0.84.  
+
+## 2. Fit a GAM with some non-linear predictors. 
+```{r}
+# Fit a gam with non-linear components for quantitative variables 
+# (temp, atemp, hum, and windspeed)
+gam_model <- gam(cnt ~ s(temp) + s(atemp) + s(hum) + s(windspeed) 
+                 + season + mnth + holiday + weekday + workingday + weathersit, 
+                 data = bike_2011)
+summary(gam_model)
+
+# Calculate training R2
+preds_2011_gam <- predict(gam_model)
+r2_gam_2011 <- cor(Y_2011, preds_2011_gam)^2
+cat(sprintf("Training R2 for GAM model: %.2f \n", r2_gam_2011))
+```
+The GAM model has a training R2 of 0.89, which is higher than all the previous model. Anova for Parametric Effects show that the linear components of season, month, holioday, weather situation, temp, atemp, hum, and windspeed are all significant. Anova for Non-parametric Effects show that the non-linear components of temp, atemp, hum, and windspeed are also significant. This suggests that the relationship between these predictors and total rentals is not strictly linear, and the GAM model captures this non-linearity to improve fit.  
+
+## 3. Evaluate the models on 2012 data.
+```{r}
+# Prepare 2012 data
+X_2012_matrix <- model.matrix(cnt ~ season + mnth + holiday + weekday + workingday +
+                       weathersit + temp + hum + windspeed,
+                       data = bike_2012)[, -1]
+Y_2012 <- bike_2012$cnt
+
+
+# Perform prediction and calculate RSME and R2 for each model
+# Lasso
+preds_2012_lasso <- predict(lasso_model, newx = X_2012_matrix)
+rmse_lasso <- sqrt(mean((Y_2012 - preds_2012_lasso)^2))
+r2_lasso <- cor(Y_2012, preds_2012_lasso)^2
+
+# Ridge
+preds_2012_ridge <- predict(ridge_model, newx = X_2012_matrix)
+rmse_ridge <- sqrt(mean((Y_2012 - preds_2012_ridge)^2))
+r2_ridge <- cor(Y_2012, preds_2012_ridge)^2
+
+# PCR
+X_2012_matrix <- X_2012_matrix[, apply(X_2012_matrix, 2, var) > 0]
+preds_2012_pcr <- predict(prc_fit, newdata = X_2012_matrix, ncomp = best_M)
+rmse_pcr <- sqrt(mean((Y_2012 - preds_2012_pcr)^2))
+r2_pcr <- cor(Y_2012, preds_2012_pcr)^2
+
+# PLS
+preds_2012_pls <- predict(pls_fit, newdata = X_2012_matrix, ncomp = best_M_pls)
+rmse_pls <- sqrt(mean((Y_2012 - preds_2012_pls)^2))
+r2_pls <- cor(Y_2012, preds_2012_pls)^2
+
+# GAM
+preds_2012_gam <- predict(gam_model, newdata = bike_2012)
+rmse_gam <- sqrt(mean((Y_2012 - preds_2012_gam)^2))
+r2_gam <- cor(Y_2012, preds_2012_gam)^2
+
+# Put results in a data frame for comparison
+results <- data.frame(
+  Model = c("Backward Selection", "Lasso", "Ridge", "PCR", "PLS", "GAM"),
+  RMSE = c(backward_rsme, rmse_lasso, rmse_ridge, rmse_pcr, rmse_pls, rmse_gam),
+  R2 = c(backward_r2, r2_lasso, r2_ridge, r2_pcr, r2_pls, r2_gam)
+)
+
+print(results)
+```
+The GAM model has the lowest RMSE and highest R2 on the 2012 data, indicating that it has the best predictive performance among the models we fitted. The lasso, ridge, PCR, and PLS models have similar performance, with slightly higher RMSE and lower R2 compared to the GAM model. The backward selection model performs the worst on the 2012 data, suggesting that it may have overfited the 2011 data and does not generalize well to new data.  
+
+
+
